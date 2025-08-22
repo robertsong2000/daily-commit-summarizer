@@ -1,5 +1,7 @@
 # Daily Commit Summarizer with LLM & Feishu Notifications
 
+![cover](./cover.png)
+
 ## 📌 Scenario
 
 Software teams often want a quick overview of what happened in their repositories each day without reading through raw git log or giant pull requests.
@@ -15,6 +17,7 @@ This project provides a GitHub Actions workflow and a TypeScript script that:
 
 This gives your team a concise, human-readable daily changelog that improves visibility and saves review time.
 
+<br/>
 
 ## 🚀 Features
 
@@ -23,6 +26,8 @@ This gives your team a concise, human-readable daily changelog that improves vis
 3. Multi-level summarization:per-diff-chunk → per-commit → daily overview.
 4. Feishu notifications: daily digest delivered to your chat group.
 5. Configurable: choose model, branch filters, chunk sizes, etc.
+
+<br/>
 
 ## ⚙️ Setup
 
@@ -86,6 +91,7 @@ Go to Repo → Settings → Secrets and variables → Actions → New repository
 
 `npm install`
 
+<br/>
 
 ## 📄 Script Overview
 
@@ -97,6 +103,7 @@ scripts/daily-summary.ts does the heavy lifting:
 5. Merges everything into a daily report.
 6. Posts the result to Feishu via Webhook.
 
+<br/>
 
 ## 🖥 Example Output (Feishu)
 
@@ -124,6 +131,7 @@ scripts/daily-summary.ts does the heavy lifting:
 - Lockfile updates ignored
 ```
 
+<br/>
 
 ## 🔧 Configuration
 
@@ -136,15 +144,14 @@ You can tweak behavior with variables:
 |DIFF_CHUNK_MAX_CHARS|80000|Max diff characters per LLM request|
 |TZ|Asia/Shanghai|Timezone for “today”|
 
-
-⸻
+<br/>
 
 ## 📌 Notes
 * Feishu text messages do not support Markdown.
 *	For rich formatting (titles, links, lists), consider switching to msg_type: post in postToLark().
 * For private repos: don’t leak code to third-party LLMs unless compliant. You can swap OpenAI with your internal LLM gateway.
 
-⸻
+<br/>
 
 ## 🤝 Contributing
 
@@ -153,7 +160,7 @@ Contributions welcome! Ideas:
 * Support PR comments in addition to daily digest.
 * Extend output with diff statistics (files changed, LOC).
 
-⸻
+<br/>
 
 ## 📜 License
 

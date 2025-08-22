@@ -1,4 +1,4 @@
-# Daily Commit Summarizer with LLM & Feishu Notifications
+# Daily Commit Summarizer
 
 ![cover](./cover.png)
 

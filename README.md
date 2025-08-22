@@ -1,4 +1,4 @@
-# 💬 每日提交摘要工具
+# Daily Commit Summarizer
 
 ![cover](./cover.png)
 

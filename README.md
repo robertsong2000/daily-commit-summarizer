@@ -146,6 +146,7 @@ TZ|Asia/Shanghai|定义 “今天” 的时区
 * 飞书纯文本消息不支持 Markdown。
 * 如果需要富文本格式（标题、链接、列表等），请考虑在 postToLark() 中使用 msg_type: post。
 * 私有仓库需注意：不要将代码上传至第三方 LLM 服务，除非符合公司合规要求。可替换为内部 LLM 网关。
+* 由于本人使用的是 Azure OpenAI， 请求路径与 OpenAI API 的不同，若使用其他服务请自行调整。
 
 <br/>
 

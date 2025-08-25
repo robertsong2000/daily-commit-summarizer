@@ -150,7 +150,7 @@ You can tweak behavior with variables:
 * Feishu text messages do not support Markdown.
 *	For rich formatting (titles, links, lists), consider switching to msg_type: post in postToLark().
 * For private repos: don’t leak code to third-party LLMs unless compliant. You can swap OpenAI with your internal LLM gateway.
-
+* Since I am using Azure OpenAI, the request path is different from the OpenAI API. If you are using another service, please adjust accordingly.
 <br/>
 
 ## 🤝 Contributing

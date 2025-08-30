@@ -50,8 +50,14 @@ cp .env.example .env
 **3. 本地测试运行**
 
 ```bash
-# 直接运行（自动加载 .env 文件）
+# 默认获取今日提交（自动加载 .env 文件）
 npx tsx scripts/daily-summary.ts
+
+# 获取最近2天提交
+DAYS_BACK=2 npx tsx scripts/daily-summary.ts
+
+# 获取最近3天提交
+DAYS_BACK=3 npx tsx scripts/daily-summary.ts
 
 # 或者使用环境变量
 OPENAI_API_KEY=your-key npx tsx scripts/daily-summary.ts

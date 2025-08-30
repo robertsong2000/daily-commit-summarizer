@@ -47,6 +47,13 @@ const DIFF_CHUNK_MAX_CHARS = parseInt(
   10,
 );
 
+// 调试信息
+console.log(`🔍 调试信息:`);
+console.log(`   工作目录: ${process.cwd()}`);
+console.log(`   配置的仓库: ${REPO}`);
+console.log(`   回溯天数: ${process.env.DAYS_BACK || "1"}`);
+console.log(`   Git仓库存在: ${require("node:fs").existsSync('.git') ? '是' : '否'}`);
+
 if (!OPENAI_API_KEY) {
   console.error("Missing OPENAI_API_KEY");
   process.exit(1);
@@ -69,6 +76,7 @@ function safeArray<T>(xs: T[] | undefined | null) {
 const DAYS_BACK = parseInt(process.env.DAYS_BACK || "1", 10);
 const since = DAYS_BACK === 1 ? "midnight" : `${DAYS_BACK}.days.ago`;
 const until = "now";
+console.log(`🔍 时间范围: ${since} 到 ${until}`);
 
 // 拉全远端（建议在 workflow 里执行：git fetch --all --prune --tags）
 // 这里再次保险 fetch 一次，避免本地调试遗漏
@@ -79,12 +87,14 @@ try {
 }
 
 // 列出所有 origin/* 远端分支，排除 origin/HEAD
+console.log(`🔍 获取远程分支列表...`);
 const remoteBranches = sh(
   `git for-each-ref --format="%(refname:short)" refs/remotes/origin | grep -v "^origin/HEAD$" || true`,
 )
   .split("\n")
   .map((s) => s.trim())
   .filter(Boolean);
+console.log(`   发现远程分支: ${remoteBranches.join(', ') || '无'}`);
 
 // 分支白名单/黑名单（如需）：在此可用正则筛选 remoteBranches
 
@@ -97,13 +107,15 @@ type CommitMeta = {
 };
 
 const branchToCommits = new Map<string, string[]>();
+console.log(`🔍 分析每个分支的提交...`);
 for (const rb of remoteBranches) {
-  const list = sh(
-    `git log ${rb} --no-merges --since="${since}" --until="${until}" --pretty=format:%H --reverse || true`,
-  )
+  const cmd = `git log ${rb} --no-merges --since="${since}" --until="${until}" --pretty=format:%H --reverse || true`;
+  console.log(`   执行命令: ${cmd}`);
+  const list = sh(cmd)
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
+  console.log(`   分支 ${rb}: 找到 ${list.length} 个提交`);
   branchToCommits.set(rb, list.slice(-PER_BRANCH_LIMIT));
 }
 
@@ -117,12 +129,13 @@ for (const [rb, shas] of branchToCommits) {
 }
 
 // 在所有分支联合视图中获取今天的提交，按时间从早到晚，再与 shaToBranches 交集过滤
-const allShasOrdered = sh(
-  `git log --no-merges --since="${since}" --until="${until}" --all --pretty=format:%H --reverse || true`,
-)
+const totalCmd = `git log --no-merges --since="${since}" --until="${until}" --all --pretty=format:%H --reverse || true`;
+console.log(`🔍 执行总查询命令: ${totalCmd}`);
+const allShasOrdered = sh(totalCmd)
   .split("\n")
   .map((s) => s.trim())
   .filter(Boolean);
+console.log(`   所有分支共找到 ${allShasOrdered.length} 个提交`);
 
 const seen = new Set<string>();
 const commitShas = allShasOrdered.filter((sha) => {
@@ -133,7 +146,7 @@ const commitShas = allShasOrdered.filter((sha) => {
 });
 
 if (commitShas.length === 0) {
-  console.log("📭 今天所有分支均无有效提交。结束。");
+  console.log(`📭 最近${DAYS_BACK}天所有分支均无有效提交。结束。`);
   process.exit(0);
 }
 
@@ -324,17 +337,19 @@ ${it.summary}`,
     )
     .join("\n\n---\n\n");
 
-  return `请将以下“当日各提交摘要”整合成**当日开发变更日报（中文）**，输出结构如下：
-# ${dateLabel} 开发变更日报（${repo})
-1. 今日概览（不超过5条）
+  const periodText = parseInt(process.env.DAYS_BACK || "1", 10) === 1 ? "今日" : `最近${process.env.DAYS_BACK || "1"}天`;
+
+  return `请将以下“各提交摘要”整合成**${periodText}开发变更日报（中文）**，输出结构如下：
+# ${dateLabel} ${periodText}开发变更日报（${repo})
+1. ${periodText}概览（不超过5条）
 2. **按分支**的关键改动清单（每条含模块/影响、是否潜在破坏性）
 3. 跨分支风险与回滚策略（如同一提交在多个分支、存在 cherry-pick/divergence）
 4. 建议测试与验证清单
 5. 其他备注（如重构/依赖升级/仅格式化）
 
-=== 当日提交摘要 BEGIN ===
+=== 提交摘要 BEGIN ===
 ${body}
-=== 当日提交摘要 END ===`;
+=== 提交摘要 END ===`;
 }
 
 // ------- 飞书 Webhook -------

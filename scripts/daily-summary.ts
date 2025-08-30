@@ -49,11 +49,13 @@ const DIFF_CHUNK_MAX_CHARS = parseInt(
 );
 
 // 调试信息
+const USE_COMMIT_INFO_ONLY = process.env.USE_COMMIT_INFO_ONLY === "true";
 console.log(`🔍 调试信息:`);
 console.log(`   工作目录: ${process.cwd()}`);
 console.log(`   配置的仓库: ${REPO}`);
 console.log(`   仓库路径: ${REPO_PATH}`);
 console.log(`   回溯天数: ${process.env.DAYS_BACK || "1"}`);
+console.log(`   使用提交信息模式: ${USE_COMMIT_INFO_ONLY ? '是' : '否'}`);
 console.log(`   Git仓库存在: ${require("node:fs").existsSync('.git') ? '是' : '否'}`);
 
 if (!OPENAI_API_KEY) {
@@ -183,65 +185,69 @@ const commitMetas: CommitMeta[] = commitShas.map((sha) => {
   return { sha, title, author, url, branches };
 });
 
-// ------- diff 获取与分片 -------
-const FILE_EXCLUDES = [
-  ":!**/*.lock",
-  ":!**/dist/**",
-  ":!**/build/**",
-  ":!**/.next/**",
-  ":!**/.vite/**",
-  ":!**/out/**",
-  ":!**/coverage/**",
-  ":!package-lock.json",
-  ":!pnpm-lock.yaml",
-  ":!yarn.lock",
-  ":!**/*.min.*",
-];
+// ------- 仅使用commit信息（不包含diff） -------
+function getCommitInfoOnly(sha: string): string {
+  try {
+    const title = sh(`git show -s --format=%s ${sha}`);
+    const body = sh(`git show -s --format=%b ${sha}`);
+    const author = sh(`git show -s --format=%an ${sha}`);
+    const date = sh(`git show -s --format=%cd ${sha}`);
+    const files = sh(`git show --name-only --format="" ${sha}`).split('\n').filter(Boolean).join(', ');
+    
+    return `提交标题: ${title}
+作者: ${author}
+日期: ${date}
+涉及文件: ${files}
 
-function getParentSha(sha: string) {
-  const line = sh(`git rev-list --parents -n 1 ${sha} || true`);
-  const parts = line.split(" ").filter(Boolean);
-  // 非 merge 情况 parent 通常只有一个；root commit 无 parent
-  return parts[1];
+${body ? `提交说明:\n${body}` : ''}`;
+  } catch (error) {
+    return `获取提交信息失败: ${error}`;
+  }
 }
 
-function getDiff(sha: string) {
+// ------- 原有diff处理函数（保留兼容性） -------
+const FILE_EXCLUDES = [
+  "package-lock.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "*.min.js",
+  "*.min.css",
+  "dist/",
+  "build/",
+  "node_modules/",
+];
+
+function getParentSha(sha: string): string {
+  return sh(`git rev-parse ${sha}^`);
+}
+
+function getDiff(sha: string): string {
   const parent = getParentSha(sha);
-  const base = parent || sh(`git hash-object -t tree /dev/null`);
-  const excludes = FILE_EXCLUDES.join(" ");
-  const diff = sh(
-    `git diff --unified=0 --minimal ${base} ${sha} -- . ${excludes} || true`,
-  );
-  return diff;
+  const excludeFlags = FILE_EXCLUDES.flatMap((pattern) => [
+    "--",
+    ":(exclude)" + pattern,
+  ]).join(" ");
+  return sh(`git diff ${parent} ${sha} --no-renames --binary ${excludeFlags}`);
 }
 
 function splitPatchByFile(patch: string): string[] {
-  if (!patch) return [];
-  const parts = patch.split(/^diff --git.*$/m);
-  return parts.map((p) => p.trim()).filter(Boolean);
-}
-
-function chunkBySize(parts: string[], limit = DIFF_CHUNK_MAX_CHARS): string[] {
-  const out: string[] = [];
-  let buf = "";
-  for (const p of parts) {
-    const candidate = buf ? `${buf}\n\n${p}` : p;
-    if (candidate.length > limit) {
-      if (buf) out.push(buf);
-      if (p.length > limit) {
-        for (let i = 0; i < p.length; i += limit) {
-          out.push(p.slice(i, i + limit));
-        }
-        buf = "";
-      } else {
-        buf = p;
-      }
+  const parts: string[] = [];
+  let current: string[] = [];
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("diff --git")) {
+      if (current.length) parts.push(current.join("\n"));
+      current = [line];
     } else {
-      buf = candidate;
+      current.push(line);
     }
   }
-  if (buf) out.push(buf);
-  return out;
+  if (current.length) parts.push(current.join("\n"));
+  return parts;
+}
+
+// 简化分片处理（commit信息通常较短）
+function chunkBySize(parts: string[], limit = DIFF_CHUNK_MAX_CHARS): string[] {
+  return parts.length > 0 ? [parts.join('\n\n')] : [];
 }
 
 // ------- OpenAI Chat API -------
@@ -318,9 +324,30 @@ function commitChunkPrompt(
   meta: CommitMeta,
   partIdx: number,
   total: number,
-  patch: string,
+  content: string,
+  useCommitInfoOnly: boolean
 ) {
-  return `你是一名资深工程师与发布经理。以下是提交 ${meta.sha.slice(0, 7)}（${meta.title}）的 diff 片段（第 ${partIdx}/${total} 段），请用中文输出结构化摘要：
+  if (useCommitInfoOnly) {
+    return `你是一名资深工程师与发布经理。请基于以下提交信息，用中文输出结构化摘要：
+
+提交信息：
+- SHA: ${meta.sha}
+- 标题: ${meta.title}
+- 作者: ${meta.author}
+- 分支: ${meta.branches.join(", ")}
+- 链接: ${meta.url}
+
+提交详情：
+${content}
+
+要求输出：
+1) 变更要点（面向工程师与产品）：基于提交信息总结主要改动与意图
+2) 影响范围：模块/功能/配置等可能影响的部分
+3) 风险&回滚点：基于改动内容评估潜在风险
+4) 测试建议：针对此改动的测试重点
+注意：基于提交信息合理推断，不要过度臆测；如果只是文档更新或配置调整也请明确指出。`;
+  } else {
+    return `你是一名资深工程师与发布经理。以下是提交 ${meta.sha.slice(0, 7)}（${meta.title}）的 diff 片段（第 ${partIdx}/${total} 段），请用中文输出结构化摘要：
 
 提交信息：
 - SHA: ${meta.sha}
@@ -337,8 +364,9 @@ function commitChunkPrompt(
 注意：仅基于当前片段，不要臆测；不要贴长代码；如果只是格式化/重命名也请明确指出。
 
 === DIFF PART BEGIN ===
-${patch}
+${content}
 === DIFF PART END ===`;
+  }
 }
 
 function commitMergePrompt(meta: CommitMeta, parts: string[]) {
@@ -417,34 +445,52 @@ async function postToLark(text: string) {
   const perCommitFinal: { meta: CommitMeta; summary: string }[] = [];
 
   for (const meta of commitMetas) {
-    const fullPatch = getDiff(meta.sha);
+    let content: string;
+    let parts: string[];
 
-    if (!fullPatch || !fullPatch.trim()) {
-      perCommitFinal.push({
-        meta,
-        summary: `（无有效业务改动或改动已被过滤，例如 lockfile/构建产物/二进制，或空提交）`,
-      });
-      continue;
+    if (USE_COMMIT_INFO_ONLY) {
+      // 使用commit信息模式
+      content = getCommitInfoOnly(meta.sha);
+      if (!content || !content.trim()) {
+        perCommitFinal.push({
+          meta,
+          summary: `（无法获取提交信息或提交为空）`,
+        });
+        continue;
+      }
+      parts = chunkBySize([content], DIFF_CHUNK_MAX_CHARS);
+    } else {
+      // 使用diff模式（原有逻辑）
+      try {
+        const fullPatch = getDiff(meta.sha);
+        if (!fullPatch.trim()) {
+          content = "（无代码变更）";
+          parts = [content];
+        } else {
+          const fileParts = splitPatchByFile(fullPatch);
+          parts = chunkBySize(fileParts, DIFF_CHUNK_MAX_CHARS);
+        }
+      } catch (error) {
+        content = `（获取diff失败：${error}）`;
+        parts = [content];
+      }
     }
 
-    const fileParts = splitPatchByFile(fullPatch);
-    const chunks = chunkBySize(fileParts, DIFF_CHUNK_MAX_CHARS);
-
     const partSummaries: string[] = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const prompt = commitChunkPrompt(meta, i + 1, chunks.length, chunks[i]);
+    for (let i = 0; i < parts.length; i++) {
+      const prompt = commitChunkPrompt(meta, i + 1, parts.length, parts[i], USE_COMMIT_INFO_ONLY);
       try {
         const sum = await chat(prompt);
-        partSummaries.push(sum || `（片段${i + 1}摘要为空）`);
+        partSummaries.push(sum || `（摘要为空）`);
       } catch (e: any) {
-        partSummaries.push(`（片段${i + 1}调用失败：${String(e)}）`);
+        partSummaries.push(`（调用失败：${String(e)}）`);
       }
     }
 
     // 合并为“单提交摘要”
     let merged = "";
     try {
-      merged = await chat(commitMergePrompt(meta, partSummaries));
+      merged = await chat(commitMergePrompt(meta, partSummaries, USE_COMMIT_INFO_ONLY));
     } catch (e: any) {
       merged = partSummaries.join("\n\n");
     }

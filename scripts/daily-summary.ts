@@ -1,16 +1,39 @@
 // scripts/daily-summary.ts
-// 运行前：确保在 GitHub Actions 或本地 shell 中已设置：
-//   - OPENAI_API_KEY：LLM 密钥（可替换为企业网关）
-//   - OPENAI_BASE_URL：LLM API 地址（可替换为自建网关）
-//   - LARK_WEBHOOK_URL：飞书自定义机器人 Webhook （也可替换为其他通知 Webhook ）
-// 可选：
-//   - PER_BRANCH_LIMIT：每个分支最多统计的“今日提交”条数（默认 200）
-//   - DIFF_CHUNK_MAX_CHARS：单次送模的最大字符数（默认 80000）
-//   - MODEL_NAME：指定模型名称（默认 gpt-4.1-mini）
-//   - REPO：owner/repo（Actions 内自动注入）
+// 支持自动加载 .env 文件
+// 运行前：确保已设置环境变量，或在项目根目录创建 .env 文件
 
 import { execSync } from "node:child_process";
 import https from "node:https";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+// 自动加载 .env 文件
+function loadEnv() {
+  try {
+    const envPath = resolve(process.cwd(), '.env');
+    const envContent = readFileSync(envPath, 'utf8');
+    
+    envContent.split('\n').forEach(line => {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#')) {
+        const [key, ...valueParts] = trimmed.split('=');
+        if (key && valueParts.length > 0) {
+          const value = valueParts.join('=').trim();
+          if (!process.env[key]) {
+            process.env[key] = value;
+          }
+        }
+      }
+    });
+    console.log("✅ 已加载 .env 文件");
+  } catch (error) {
+    // .env 文件不存在时跳过
+    console.log("ℹ️  未找到 .env 文件，使用系统环境变量");
+  }
+}
+
+// 加载环境变量
+loadEnv();
 
 // ------- 环境变量 -------
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || "https://api.openai.com";
@@ -42,7 +65,9 @@ function safeArray<T>(xs: T[] | undefined | null) {
 }
 
 // ------- 分支与提交收集（覆盖 origin/* 全分支）-------
-const since = "midnight"; // 受 TZ=America/Los_Angeles 影响
+// 支持自定义天数，通过 DAYS_BACK 环境变量设置
+const DAYS_BACK = parseInt(process.env.DAYS_BACK || "1", 10);
+const since = DAYS_BACK === 1 ? "midnight" : `${DAYS_BACK}.days.ago`;
 const until = "now";
 
 // 拉全远端（建议在 workflow 里执行：git fetch --all --prune --tags）

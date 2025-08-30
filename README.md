@@ -39,7 +39,25 @@ git clone https://github.com/nanbingxyz/daily-commit-summarizer.git
 cd daily-commit-summarizer
 ```
 
-**2. 添加 GitHub Actions 工作流**
+**2. 配置环境变量**
+
+创建 `.env` 文件：
+```bash
+cp .env.example .env
+# 编辑 .env 文件，填入你的配置
+```
+
+**3. 本地测试运行**
+
+```bash
+# 直接运行（自动加载 .env 文件）
+npx tsx scripts/daily-summary.ts
+
+# 或者使用环境变量
+OPENAI_API_KEY=your-key npx tsx scripts/daily-summary.ts
+```
+
+**4. 添加 GitHub Actions 工作流**
 
 在 .github/workflows/daily-summary.yml 中加入：
 ```yaml

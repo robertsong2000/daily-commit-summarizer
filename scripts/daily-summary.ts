@@ -249,6 +249,8 @@ type ChatPayload = {
   model: string;
   messages: { role: "system" | "user" | "assistant"; content: string }[];
   temperature?: number;
+  enable_thinking?: boolean;
+  stream?: boolean;
 };
 
 async function chat(prompt: string): Promise<string> {
@@ -256,6 +258,8 @@ async function chat(prompt: string): Promise<string> {
     model: MODEL_NAME,
     messages: [{ role: "user", content: prompt }],
     temperature: 0.2,
+    enable_thinking: false, // 阿里通义千问要求非流式调用时禁用思考模式
+    stream: false, // 使用非流式调用
   };
   const body = JSON.stringify(payload);
 

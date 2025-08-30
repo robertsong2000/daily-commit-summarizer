@@ -40,6 +40,7 @@ const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || "https://api.openai.com";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const LARK_WEBHOOK_URL = process.env.LARK_WEBHOOK_URL || "";
 const REPO = process.env.REPO || ""; // e.g. "org/repo"
+const REPO_PATH = process.env.REPO_PATH || "."; // 仓库路径配置
 const MODEL_NAME = process.env.MODEL_NAME || "gpt-4.1-mini";
 const PER_BRANCH_LIMIT = parseInt(process.env.PER_BRANCH_LIMIT || "200", 10);
 const DIFF_CHUNK_MAX_CHARS = parseInt(
@@ -51,12 +52,32 @@ const DIFF_CHUNK_MAX_CHARS = parseInt(
 console.log(`🔍 调试信息:`);
 console.log(`   工作目录: ${process.cwd()}`);
 console.log(`   配置的仓库: ${REPO}`);
+console.log(`   仓库路径: ${REPO_PATH}`);
 console.log(`   回溯天数: ${process.env.DAYS_BACK || "1"}`);
 console.log(`   Git仓库存在: ${require("node:fs").existsSync('.git') ? '是' : '否'}`);
 
 if (!OPENAI_API_KEY) {
   console.error("Missing OPENAI_API_KEY");
   process.exit(1);
+}
+
+// 切换到指定仓库路径
+if (REPO_PATH !== ".") {
+  const fullPath = require("node:path").resolve(process.cwd(), REPO_PATH);
+  console.log(`🔍 切换到仓库路径: ${fullPath}`);
+  
+  if (!require("node:fs").existsSync(fullPath)) {
+    console.error(`❌ 仓库路径不存在: ${fullPath}`);
+    process.exit(1);
+  }
+  
+  if (!require("node:fs").existsSync(require("node:path").join(fullPath, '.git'))) {
+    console.error(`❌ 指定路径不是Git仓库: ${fullPath}`);
+    process.exit(1);
+  }
+  
+  process.chdir(fullPath);
+  console.log(`✅ 已切换到仓库目录: ${process.cwd()}`);
 }
 
 // ------- 工具函数 -------
@@ -239,18 +260,26 @@ async function chat(prompt: string): Promise<string> {
   const body = JSON.stringify(payload);
 
   return new Promise((resolve, reject) => {
-    const url = new URL(OPENAI_BASE_URL);
-    const req = https.request(
-      {
-        hostname: url.hostname,
-        path: `/openai/deployments/${MODEL_NAME}/chat/completions?api-version=2024-12-01-preview`,
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Length": Buffer.byteLength(body),
-        },
+    // 清理可能的零宽空格和其他不可见字符
+    const cleanUrl = OPENAI_BASE_URL.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    const url = new URL(cleanUrl);
+    
+    // 阿里通义千问兼容模式：DashScope使用/v1/chat/completions
+    const path = '/compatible-mode/v1/chat/completions';
+    
+    const options = {
+      hostname: url.hostname,
+      port: url.protocol === 'https:' ? 443 : 80,
+      path: path,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Length": Buffer.byteLength(body),
       },
+    };
+    
+    const req = https.request(options,
       (res) => {
         let data = "";
         res.on("data", (d) => (data += d));
@@ -441,8 +470,17 @@ async function postToLark(text: string) {
         .join("\n\n---\n\n");
   }
 
-  // 发送飞书
-  await postToLark(daily);
+  // 添加通知关键字并发送飞书
+  const notificationKeyword = "【每日代码提交摘要】";
+  const finalMessage = `${notificationKeyword}\n\n${daily}`;
+  
+  console.log("\n" + "=".repeat(50));
+  console.log("📋 生成的日报内容：");
+  console.log("=".repeat(50));
+  console.log(finalMessage);
+  console.log("=".repeat(50));
+  
+  await postToLark(finalMessage);
   console.log("✅ 已发送飞书日报。");
 })().catch((err) => {
   console.error(err);
